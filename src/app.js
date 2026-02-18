@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 const adminRoutes = require('./routes/adminRoutes');
 const publicRoutes = require('./routes/publicRoutes');
@@ -16,6 +19,23 @@ const app = express();
 connectDB().then(() => {
     seedSuperAdmin();
 });
+
+// Security & Optimization Middleware
+app.use(helmet());
+app.use(compression());
+
+// Rate Limiting: Max 100 requests per 1 minute per IP
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 100, // limit each IP to 100 requests per windowMs
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    message: {
+        success: false,
+        message: 'Too many requests, please try again later.'
+    }
+});
+app.use(limiter);
 
 // Middleware
 app.use(cors({
