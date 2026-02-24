@@ -4,9 +4,9 @@ const { JWT_SECRET } = require('../middleware/authMiddleware');
 
 const COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    secure: true,         
+    sameSite: 'none',     
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
 };
 
@@ -232,7 +232,13 @@ const deleteUser = async (req, res) => {
 
 // ─── Logout ───
 const logout = async (req, res) => {
-    res.clearCookie('token', { path: '/' });
+    res.clearCookie('token', {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none',
+        path: '/',
+    });
+
     return res.json({
         success: true,
         message: 'Logout berhasil.',

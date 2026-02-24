@@ -15,56 +15,82 @@ require('dotenv').config();
 
 const app = express();
 
-// Connect Database & seed super admin
+/* ===============================
+   DATABASE
+================================ */
 connectDB().then(() => {
     seedSuperAdmin();
 });
 
-// Security & Optimization Middleware
-app.use(helmet());
-app.use(compression());
-
-// Rate Limiting: Max 100 requests per 1 minute per IP
-const limiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 100, // limit each IP to 100 requests per windowMs
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-    message: {
-        success: false,
-        message: 'Too many requests, please try again later.'
-    }
-});
-app.use(limiter);
-
-// Middleware
+/* ===============================
+   CORS CONFIG
+================================ */
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
     .split(',')
     .map(origin => origin.trim());
 
 app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
-        return callback(new Error(`Origin ${origin} not allowed by CORS`));
-    },
-    credentials: true, // Allow cookies
+    origin: allowedOrigins,
+    credentials: true,
 }));
+
+// Handle preflight request explicitly
+app.options('*', cors({
+    origin: allowedOrigins,
+    credentials: true,
+}));
+
+/* ===============================
+   SECURITY & OPTIMIZATION
+================================ */
+app.use(helmet());
+app.use(compression());
+
+/* ===============================
+   RATE LIMIT (SKIP OPTIONS)
+================================ */
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 100,
+    skip: (req) => req.method === 'OPTIONS', // 🔥 penting
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Too many requests, please try again later.'
+    }
+});
+
+app.use(limiter);
+
+/* ===============================
+   PARSERS & LOGGER
+================================ */
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('dev'));
 
-// Routes
-app.use('/auth', authRoutes);                       // Public: /auth/login — Protected: /auth/me, etc.
-app.use('/admin', authMiddleware, adminRoutes);      // All admin routes require authentication
-app.use('/attendance', publicRoutes);                // Public routes for mentees
+/* ===============================
+   ROUTES
+================================ */
+app.use('/auth', authRoutes);
+app.use('/admin', authMiddleware, adminRoutes);
+app.use('/attendance', publicRoutes);
 
-// Global Error Handler
+/* ===============================
+   GLOBAL ERROR HANDLER
+================================ */
 app.use((err, req, res, next) => {
     console.error(err.stack);
+
+    // CORS error handler (biar tidak 500 generic)
+    if (err.message && err.message.includes('CORS')) {
+        return res.status(403).json({
+            success: false,
+            message: err.message
+        });
+    }
+
     res.status(500).json({
         success: false,
         message: err.message || 'Internal Server Error'
