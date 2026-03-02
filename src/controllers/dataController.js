@@ -2,7 +2,7 @@ const Attendance = require('../models/menteeAttendanceModel');
 
 const getAttendanceByProgram = async (req, res) => {
     try {
-        const { program } = req.query; // e.g., ?program=AI/Web/etc
+        const { program, month } = req.query; // e.g., ?program=AI/Web/etc&month=Feb
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
@@ -12,6 +12,9 @@ const getAttendanceByProgram = async (req, res) => {
             // Use regex for flexible matching (e.g., "Web" matches "Web Development & UI/UX Design")
             query.programIL = { $regex: program, $options: 'i' };
         }
+        if (month && month !== "All" && month !== "") {
+            query.month = month;
+        }
 
         const total = await Attendance.countDocuments(query);
         const data = await Attendance.find(query)
@@ -19,8 +22,9 @@ const getAttendanceByProgram = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        // Get unique programs for filter
+        // Get unique programs and months for filter
         const programs = await Attendance.distinct("programIL");
+        const months = await Attendance.distinct("month");
 
         return res.json({
             success: true,
@@ -30,7 +34,8 @@ const getAttendanceByProgram = async (req, res) => {
                 page,
                 limit,
                 totalPages: Math.ceil(total / limit),
-                programs
+                programs,
+                months
             }
         });
     } catch (error) {
@@ -297,7 +302,7 @@ const getMentorList = async (req, res) => {
  */
 const getAttendanceByMentor = async (req, res) => {
     try {
-        const { mentor } = req.query;
+        const { mentor, month } = req.query;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
@@ -306,6 +311,9 @@ const getAttendanceByMentor = async (req, res) => {
         if (mentor && mentor !== 'All' && mentor !== '') {
             query.mentor = { $regex: mentor, $options: 'i' };
         }
+        if (month && month !== 'All' && month !== '') {
+            query.month = month;
+        }
 
         const total = await Attendance.countDocuments(query);
         const data = await Attendance.find(query)
@@ -313,9 +321,10 @@ const getAttendanceByMentor = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        // Get unique mentors for reference
+        // Get unique mentors and months for reference
         const mentors = await Attendance.distinct('mentor');
         const filteredMentors = mentors.filter(m => m && m.trim() !== '');
+        const months = await Attendance.distinct('month');
 
         return res.json({
             success: true,
@@ -326,6 +335,7 @@ const getAttendanceByMentor = async (req, res) => {
                 limit,
                 totalPages: Math.ceil(total / limit),
                 mentors: filteredMentors.sort(),
+                months,
             },
         });
     } catch (error) {
