@@ -34,6 +34,22 @@ const menteeAttendanceSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    sp1: {
+        type: Boolean,
+        default: false
+    },
+    sp2: {
+        type: Boolean,
+        default: false
+    },
+    sp3: {
+        type: Boolean,
+        default: false
+    },
+    status: {
+        type: String,
+        default: 'Active' // Active, Non-Active, Terminated
+    },
     attendance: {
         type: Map,
         of: String

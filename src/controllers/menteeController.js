@@ -20,7 +20,10 @@ const checkAttendance = async (req, res) => {
     }
 
     try {
-        const data = await Attendance.find({ whatsapp: cleanPhone }).sort({ month: 1 }); // Sorted by month or createdAt
+        let data = await Attendance.find({ whatsapp: cleanPhone }).lean(); 
+
+        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        data.sort((a, b) => monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month));
 
         if (!data || data.length === 0) {
             return res.status(404).json({

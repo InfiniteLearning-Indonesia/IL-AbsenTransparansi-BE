@@ -14,6 +14,12 @@ const parseAttendance = (record, month) => {
     const jenjang = fields['Jenjang Pendidikan'] || '';
     const mentor = fields['Personal Mentor'] || '';
 
+    // SP & Status from Airtable (SP columns are checkboxes → boolean)
+    const sp1 = !!fields['SP 1'];
+    const sp2 = !!fields['SP 2'];
+    const sp3 = !!fields['SP 3'];
+    const status = fields['Status'] || 'Active'; // Active, Non-Active, Terminated
+
     // Attendance Parsing
     const attendance = {};
     let hadir = 0;
@@ -56,6 +62,10 @@ const parseAttendance = (record, month) => {
         jenjang,
         mentor,
         month,
+        sp1,
+        sp2,
+        sp3,
+        status,
         attendance,
         summary: {
             hadir,

@@ -26,6 +26,9 @@ const getAttendanceByProgram = async (req, res) => {
         const programs = await Attendance.distinct("programIL");
         const months = await Attendance.distinct("month");
 
+        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        months.sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b));
+
         return res.json({
             success: true,
             data,
@@ -326,6 +329,9 @@ const getAttendanceByMentor = async (req, res) => {
         const filteredMentors = mentors.filter(m => m && m.trim() !== '');
         const months = await Attendance.distinct('month');
 
+        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        months.sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b));
+
         return res.json({
             success: true,
             data,
@@ -432,6 +438,199 @@ const getStatsByMentor = async (req, res) => {
     }
 };
 
+
+/**
+ * GET /admin/mentee/:whatsapp
+ * Returns all attendance records for a specific mentee across all months.
+ * WhatsApp number is used as string identifier (no integer issues with leading zeros).
+ */
+const getMenteeDetail = async (req, res) => {
+    try {
+        const { whatsapp } = req.params;
+
+        if (!whatsapp) {
+            return res.status(400).json({
+                success: false,
+                message: 'WhatsApp number is required.',
+            });
+        }
+
+        // Find all records for this mentee across all months
+        let data = await Attendance.find({ whatsapp }).lean();
+
+        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        data.sort((a, b) => monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month));
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No data found for this mentee.',
+            });
+        }
+
+        // Aggregate stats across all months
+        let totalHadir = 0;
+        let totalIzin = 0;
+        let totalAlpha = 0;
+        let totalBelumDiisi = 0;
+        const monthlyBreakdown = [];
+
+        for (const record of data) {
+            const s = record.summary || {};
+            totalHadir += s.hadir || 0;
+            totalIzin += s.izin || 0;
+            totalAlpha += s.alpha || 0;
+            totalBelumDiisi += s.belumDiisi || 0;
+
+            monthlyBreakdown.push({
+                month: record.month,
+                hadir: s.hadir || 0,
+                izin: s.izin || 0,
+                alpha: s.alpha || 0,
+                belumDiisi: s.belumDiisi || 0,
+                persen: s.persen || 0,
+            });
+        }
+
+        // Calculate total scheduled days for this mentee
+        // = sum of all date entries across all their months
+        let menteeTotalDays = 0;
+        for (const record of data) {
+            const att = record.attendance;
+            if (att) {
+                // .lean() converts Map to plain object
+                menteeTotalDays += Object.keys(att).length;
+            }
+        }
+
+        // Also get the global total scheduled days across ALL months in DB
+        // (max day count per month across all mentees, summed)
+        const perMonthDays = await Attendance.aggregate([
+            {
+                $group: {
+                    _id: '$month',
+                    daysInMonth: { $max: { $size: { $objectToArray: '$attendance' } } }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+        const globalTotalDays = perMonthDays.reduce((sum, m) => sum + m.daysInMonth, 0);
+
+        // Calculate total percentage from total days
+        const totalPersen = menteeTotalDays > 0
+            ? parseFloat(((totalHadir / menteeTotalDays) * 100).toFixed(2))
+            : 0;
+
+        // Use the latest record for profile info
+        const latest = data[data.length - 1];
+
+        return res.json({
+            success: true,
+            profile: {
+                name: latest.name,
+                institusi: latest.institusi,
+                whatsapp: latest.whatsapp,
+                programIL: latest.programIL,
+                jenjang: latest.jenjang,
+                mentor: latest.mentor,
+                batch: latest.batch,
+                sp1: latest.sp1 || false,
+                sp2: latest.sp2 || false,
+                sp3: latest.sp3 || false,
+                status: latest.status || 'Active',
+            },
+            records: data,
+            aggregated: {
+                totalHadir,
+                totalIzin,
+                totalAlpha,
+                totalBelumDiisi,
+                totalMonths: data.length,
+                menteeTotalDays,
+                globalTotalDays,
+                totalPersen,
+                perMonthDays: perMonthDays.map(m => ({ month: m._id, days: m.daysInMonth })),
+                monthlyBreakdown,
+            },
+        });
+    } catch (error) {
+        console.error('Mentee Detail Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve mentee detail.',
+        });
+    }
+};
+
+/**
+ * GET /admin/batch-performance
+ * Returns global batch-level stats: total scheduled days, per-month days,
+ * how many mentees, and how many days have actually started (non-null attendance).
+ */
+const getBatchPerformance = async (req, res) => {
+    try {
+        // Per-month day counts (max across all mentees)
+        const perMonthDays = await Attendance.aggregate([
+            {
+                $group: {
+                    _id: '$month',
+                    daysInMonth: { $max: { $size: { $objectToArray: '$attendance' } } }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const globalTotalDays = perMonthDays.reduce((sum, m) => sum + m.daysInMonth, 0);
+
+        // Count how many days have actually started (non-null) across all months
+        // We sample from one mentee to count started days per month
+        const startedDaysPerMonth = [];
+        const monthOrder = ['Feb', 'Mar', 'Apr', 'May', 'Jun'];
+
+        for (const monthInfo of perMonthDays) {
+            const m = monthInfo._id;
+            // Find one record for this month
+            const sample = await Attendance.findOne({ month: m }).lean();
+            let startedDays = 0;
+            if (sample && sample.attendance) {
+                const entries = Object.entries(sample.attendance);
+                startedDays = entries.filter(([, val]) => val && val.toString().toLowerCase() !== 'null').length;
+            }
+            startedDaysPerMonth.push({
+                month: m,
+                totalDays: monthInfo.daysInMonth,
+                startedDays,
+            });
+        }
+
+        const totalStartedDays = startedDaysPerMonth.reduce((sum, m) => sum + m.startedDays, 0);
+
+        // Count unique mentees
+        const menteeCount = await Attendance.distinct('whatsapp');
+
+        // Count total months synced
+        const monthsSynced = await Attendance.distinct('month');
+
+        return res.json({
+            success: true,
+            batch: {
+                globalTotalDays,
+                totalStartedDays,
+                totalMentees: menteeCount.length,
+                monthsSynced: monthsSynced.sort(),
+                perMonthDays: perMonthDays.map(m => ({ month: m._id, days: m.daysInMonth })),
+                startedDaysPerMonth,
+            },
+        });
+    } catch (error) {
+        console.error('Batch Performance Error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve batch performance.',
+        });
+    }
+};
+
 module.exports = {
     getAttendanceByProgram,
     getStats,
@@ -439,4 +638,6 @@ module.exports = {
     getMentorList,
     getAttendanceByMentor,
     getStatsByMentor,
+    getMenteeDetail,
+    getBatchPerformance,
 };
